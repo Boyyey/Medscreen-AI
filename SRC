@@ -1,0 +1,909 @@
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+import pandas as pd
+import numpy as np
+import pickle
+import datetime
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.svm import SVC
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.calibration import CalibratedClassifierCV
+try:
+    from imblearn.over_sampling import SMOTE
+except ImportError:
+    pass  # Optional dependency
+from PIL import Image, ImageTk
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import seaborn as sns
+import webbrowser
+import os
+
+class AdvancedCancerPredictor:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("MedScreen AI - Advanced Cancer Risk Assessment")
+        self.root.geometry("1200x800")
+        self.root.state('zoomed')  # Start maximized
+        
+        # Initialize attributes before setup_ui
+        self.biomarker_entries = {}
+        self.results = []
+        
+        # Medical-grade configuration with corrected units
+        self.config = {
+            'biomarkers': {
+                'Age': {'unit': 'years', 'range': (18, 120), 'critical': None},
+                'CRP': {'unit': 'ng/L', 'range': (0, 10), 'critical': 10},
+                'CA125': {'unit': 'U/mL', 'range': (0, 35), 'critical': 35},
+                'PSA': {'unit': 'pg/mL', 'range': (0, 4), 'critical': 4},
+                'CEA': {'unit': 'pg/mL', 'range': (0, 3), 'critical': 3},
+                'CA19.9': {'unit': 'U/mL', 'range': (0, 37), 'critical': 37},
+                'AFP': {'unit': 'pg/mL', 'range': (0, 10), 'critical': 10},
+                'Hemoglobin': {'unit': 'g/dL', 'range': (12, 17.5), 'critical': (10, 18)},
+                'WBC': {'unit': '10^9/L', 'range': (4, 11), 'critical': (3, 12)},
+                'Neutrophils': {'unit': '%', 'range': (40, 70), 'critical': None},
+                'Lymphocytes': {'unit': '%', 'range': (20, 40), 'critical': None},
+                'Platelets': {'unit': '10^9/L', 'range': (150, 450), 'critical': (100, 500)},
+                'Albumin': {'unit': 'g/dL', 'range': (3.5, 5.2), 'critical': None},
+                'ALP': {'unit': 'U/L', 'range': (44, 147), 'critical': None},
+                'GGT': {'unit': 'U/L', 'range': (9, 48), 'critical': None}
+            },
+            'cancer_types': {
+                'OV': 'Ovarian Cancer',
+                'PA': 'Pancreatic Cancer',
+                'PR': 'Prostate Cancer',
+                'BR': 'Breast Cancer',
+                'CO': 'Colorectal Cancer',
+                'LU': 'Lung Cancer',
+                'LI': 'Liver Cancer'
+            },
+            'risk_threshold': 0.65
+        }
+        
+        # Initialize models and data
+        self.models = {}
+        self.scalers = {}
+        self.patient_history = pd.DataFrame()
+        self.current_patient = {}
+        
+        # Medical disclaimer
+        self.disclaimer_text = """WARNING: This software is a decision support tool only. It does not provide 
+medical diagnosis. All results must be interpreted by qualified healthcare 
+professionals in clinical context. False positives and false negatives 
+may occur. Never disregard professional medical advice or delay seeking 
+it because of something you have seen in this application."""
+        
+        # UI Setup
+        self.setup_ui()
+        self.load_icon()
+        
+        # Load demo models (in real app, these would be clinically validated)
+        self.initialize_medical_models()
+    
+    def setup_ui(self):
+        """Create the advanced medical interface"""
+        # Configure style
+        self.style = ttk.Style()
+        self.style.configure('TFrame', background='#f0f8ff')
+        self.style.configure('TLabel', background='#f0f8ff', font=('Helvetica', 10))
+        self.style.configure('TButton', font=('Helvetica', 10))
+        self.style.configure('Header.TLabel', font=('Helvetica', 16, 'bold'))
+        self.style.configure('Critical.TLabel', foreground='red', font=('Helvetica', 10, 'bold'))
+        
+        # Main container
+        self.main_frame = ttk.Frame(self.root)
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Header
+        self.header_frame = ttk.Frame(self.main_frame)
+        self.header_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(self.header_frame, text="MedScreen AI", style='Header.TLabel').pack(side=tk.LEFT)
+        
+        # Menu bar
+        self.menubar = tk.Menu(self.root)
+        self.root.config(menu=self.menubar)
+        
+        # File menu
+        file_menu = tk.Menu(self.menubar, tearoff=0)
+        file_menu.add_command(label="New Patient", command=self.new_patient)
+        file_menu.add_command(label="Load Patient Data", command=self.load_patient_data)
+        file_menu.add_command(label="Save Report", command=self.save_report)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        self.menubar.add_cascade(label="File", menu=file_menu)
+        
+        # Tools menu
+        tools_menu = tk.Menu(self.menubar, tearoff=0)
+        tools_menu.add_command(label="Risk Calculator", command=self.show_risk_calculator)
+        tools_menu.add_command(label="Trend Analysis", command=self.show_trend_analysis)
+        tools_menu.add_command(label="Clinical Guidelines", command=self.show_guidelines)
+        self.menubar.add_cascade(label="Tools", menu=tools_menu)
+        
+        # Help menu
+        help_menu = tk.Menu(self.menubar, tearoff=0)
+        help_menu.add_command(label="About", command=self.show_about)
+        help_menu.add_command(label="Documentation", command=self.show_docs)
+        self.menubar.add_cascade(label="Help", menu=help_menu)
+        
+        # Main content area
+        self.content_frame = ttk.Frame(self.main_frame)
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Left panel - Patient info and input
+        self.left_panel = ttk.Frame(self.content_frame, width=400)
+        self.left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        
+        # Right panel - Results and visualization
+        self.right_panel = ttk.Frame(self.content_frame)
+        self.right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5)
+        
+        # Initialize panels
+        self.init_patient_info()
+        self.init_biomarker_input()
+        self.init_results_display()
+        
+        # Set demo patient after UI is fully initialized
+        self.set_demo_patient()
+        
+        # Status bar
+        self.status_var = tk.StringVar()
+        self.status_var.set("Ready")
+        ttk.Label(self.main_frame, textvariable=self.status_var, relief=tk.SUNKEN, 
+                 anchor=tk.W).pack(fill=tk.X, side=tk.BOTTOM)
+    
+    def load_icon(self):
+        """Load medical icon (placeholder - would use real icon in production)"""
+        try:
+            self.root.iconbitmap(default='medical_icon.ico')
+        except:
+            pass
+    
+    def initialize_medical_models(self):
+        """Initialize models for different cancer types"""
+        # In a real application, these would be pre-trained with clinical data
+        for cancer_code in self.config['cancer_types']:
+            # Create synthetic "trained" models for demonstration
+            base_model = RandomForestClassifier(n_estimators=200, random_state=42)
+            model = CalibratedClassifierCV(estimator=base_model, cv=5)
+            
+            # Generate synthetic training data
+            np.random.seed(42)
+            n_samples = 2000
+            X = np.random.rand(n_samples, len(self.config['biomarkers']))
+            y = np.random.randint(0, 2, n_samples)
+            
+            # Train with synthetic data
+            model.fit(X, y)
+            self.models[cancer_code] = model
+            
+            # Create scaler
+            self.scalers[cancer_code] = StandardScaler().fit(X)
+        
+        self.status_var.set("Models initialized with synthetic data - DEMO ONLY")
+    
+    def init_patient_info(self):
+        """Initialize patient information section"""
+        patient_frame = ttk.LabelFrame(self.left_panel, text="Patient Information", padding=10)
+        patient_frame.pack(fill=tk.X, pady=5)
+        
+        # Patient ID
+        ttk.Label(patient_frame, text="Patient ID:").grid(row=0, column=0, sticky=tk.W)
+        self.patient_id_entry = ttk.Entry(patient_frame)
+        self.patient_id_entry.grid(row=0, column=1, sticky=tk.EW, padx=5, pady=2)
+        
+        # Name
+        ttk.Label(patient_frame, text="Name:").grid(row=1, column=0, sticky=tk.W)
+        self.name_entry = ttk.Entry(patient_frame)
+        self.name_entry.grid(row=1, column=1, sticky=tk.EW, padx=5, pady=2)
+        
+        # Age
+        ttk.Label(patient_frame, text="Age:").grid(row=2, column=0, sticky=tk.W)
+        self.age_entry = ttk.Entry(patient_frame)
+        self.age_entry.grid(row=2, column=1, sticky=tk.EW, padx=5, pady=2)
+        
+        # Gender
+        ttk.Label(patient_frame, text="Gender:").grid(row=3, column=0, sticky=tk.W)
+        self.gender_var = tk.StringVar(value="Unknown")
+        gender_menu = ttk.OptionMenu(patient_frame, self.gender_var, 
+                                    "Unknown", "Male", "Female")
+        gender_menu.grid(row=3, column=1, sticky=tk.EW, padx=5, pady=2)
+        
+        # Medical History
+        ttk.Label(patient_frame, text="Medical History:").grid(row=4, column=0, sticky=tk.NW)
+        self.history_text = tk.Text(patient_frame, height=5, width=30)
+        self.history_text.grid(row=4, column=1, sticky=tk.EW, padx=5, pady=2)
+        
+        # Family History
+        ttk.Label(patient_frame, text="Family Cancer History:").grid(row=5, column=0, sticky=tk.NW)
+        self.family_history_text = tk.Text(patient_frame, height=3, width=30)
+        self.family_history_text.grid(row=5, column=1, sticky=tk.EW, padx=5, pady=2)
+    
+    def validate_numeric_input(self, new_value):
+        """Validate that input is numeric"""
+        if not new_value:  # Allow empty field (user might be deleting)
+            return True
+        try:
+            float(new_value)
+            return True
+        except ValueError:
+            return False
+    
+    def init_biomarker_input(self):
+        """Initialize biomarker input section with validation"""
+        input_frame = ttk.LabelFrame(self.left_panel, text="Biomarker Panel", padding=10)
+        input_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Create a canvas and scrollbar with improved layout
+        container = ttk.Frame(input_frame)
+        container.pack(fill=tk.BOTH, expand=True)
+        
+        canvas = tk.Canvas(container)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all"),
+                width=e.width  # Set canvas width to match frame
+            )
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Use grid for better layout control
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
+        
+        # Create input fields for each biomarker with adjusted layout
+        self.biomarker_entries = {}
+        row = 0
+        
+        for biomarker, info in self.config['biomarkers'].items():
+            frame = ttk.Frame(scrollable_frame)
+            frame.grid(row=row, column=0, sticky=tk.EW, padx=5, pady=2)
+            frame.grid_columnconfigure(1, weight=1)  # Make entry expand
+            
+            # Label with unit
+            label_text = f"{biomarker} ({info['unit']}):"
+            label = ttk.Label(frame, text=label_text, width=20, anchor=tk.E)
+            label.grid(row=0, column=0, sticky=tk.E)
+            
+            # Entry field with validation
+            entry = ttk.Entry(frame, width=10)
+            vcmd = (self.root.register(self.validate_numeric_input), '%P')
+            entry.config(validate='key', validatecommand=vcmd)
+            entry.grid(row=0, column=1, sticky=tk.W, padx=5)
+            self.biomarker_entries[biomarker] = entry
+            
+            # Range indicator
+            range_text = f"Normal: {info['range'][0]}-{info['range'][1]}"
+            range_label = ttk.Label(frame, text=range_text, width=25)
+            range_label.grid(row=0, column=2, sticky=tk.W, padx=5)
+            
+            row += 1
+        
+        # Buttons
+        button_frame = ttk.Frame(self.left_panel)
+        button_frame.pack(fill=tk.X, pady=10)
+        
+        analyze_btn = ttk.Button(button_frame, text="Analyze Biomarkers", 
+                               command=self.analyze_biomarkers)
+        analyze_btn.pack(side=tk.LEFT, padx=5)
+        
+        clear_btn = ttk.Button(button_frame, text="Clear", 
+                             command=self.clear_biomarkers)
+        clear_btn.pack(side=tk.LEFT, padx=5)
+    
+    def init_results_display(self):
+        """Initialize results display section with improved layout"""
+        # Notebook for multiple tabs
+        self.results_notebook = ttk.Notebook(self.right_panel)
+        self.results_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Risk Assessment tab
+        self.risk_frame = ttk.Frame(self.results_notebook)
+        self.results_notebook.add(self.risk_frame, text="Risk Assessment")
+        
+        # Create a paned window for better layout control
+        self.risk_paned = ttk.PanedWindow(self.risk_frame, orient=tk.VERTICAL)
+        self.risk_paned.pack(fill=tk.BOTH, expand=True)
+        
+        # Risk summary
+        summary_frame = ttk.Frame(self.risk_paned)
+        self.risk_summary = tk.Text(summary_frame, height=8, wrap=tk.WORD, 
+                                  font=('Helvetica', 11))
+        self.risk_summary.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.risk_summary.insert(tk.END, "Biomarker analysis results will appear here.")
+        self.risk_summary.config(state=tk.DISABLED)
+        self.risk_paned.add(summary_frame)
+        
+        # Visualization frame
+        viz_container = ttk.Frame(self.risk_paned)
+        self.viz_frame = ttk.Frame(viz_container)
+        self.viz_frame.pack(fill=tk.BOTH, expand=True)
+        self.risk_paned.add(viz_container, weight=1)
+        
+        # Detailed Results tab
+        self.detail_frame = ttk.Frame(self.results_notebook)
+        self.results_notebook.add(self.detail_frame, text="Detailed Analysis")
+        
+        # Biomarker table
+        columns = ("Biomarker", "Value", "Normal Range", "Status")
+        self.biomarker_tree = ttk.Treeview(self.detail_frame, columns=columns, show="headings")
+        
+        for col in columns:
+            self.biomarker_tree.heading(col, text=col)
+            self.biomarker_tree.column(col, width=120)
+        
+        self.biomarker_tree.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Recommendations tab
+        self.recommend_frame = ttk.Frame(self.results_notebook)
+        self.results_notebook.add(self.recommend_frame, text="Clinical Recommendations")
+        
+        self.recommend_text = tk.Text(self.recommend_frame, wrap=tk.WORD, 
+                                    font=('Helvetica', 11))
+        self.recommend_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.recommend_text.insert(tk.END, "Clinical recommendations will appear here.")
+        self.recommend_text.config(state=tk.DISABLED)
+        
+        # Disclaimer
+        disclaimer_frame = ttk.Frame(self.right_panel)
+        disclaimer_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        disclaimer_label = ttk.Label(disclaimer_frame, text=self.disclaimer_text, 
+                                   wraplength=700, foreground="red", 
+                                   font=('Helvetica', 8, 'italic'))
+        disclaimer_label.pack()
+    
+    def set_demo_patient(self):
+        """Set demo patient data for illustration"""
+        self.patient_id_entry.delete(0, tk.END)
+        self.patient_id_entry.insert(0, "DEMO-001")
+        
+        self.name_entry.delete(0, tk.END)
+        self.name_entry.insert(0, "John Doe")
+        
+        self.age_entry.delete(0, tk.END)
+        self.age_entry.insert(0, "52")
+        
+        self.gender_var.set("Male")
+        
+        self.history_text.delete(1.0, tk.END)
+        self.history_text.insert(tk.END, "Hypertension, Type 2 Diabetes")
+        
+        self.family_history_text.delete(1.0, tk.END)
+        self.family_history_text.insert(tk.END, "Father: Colorectal cancer at 68\nMother: Breast cancer at 60")
+        
+        # Set some demo biomarker values
+        demo_values = {
+            'Age': 52,
+            'CRP': 8.2,
+            'CA125': 28,
+            'PSA': 3.8,
+            'CEA': 4.1,
+            'CA19.9': 42,
+            'AFP': 7,
+            'Hemoglobin': 13.5,
+            'WBC': 8.2,
+            'Neutrophils': 65,
+            'Lymphocytes': 25,
+            'Platelets': 320,
+            'Albumin': 4.0,
+            'ALP': 120,
+            'GGT': 38
+        }
+        
+        for biomarker, entry in self.biomarker_entries.items():
+            entry.delete(0, tk.END)
+            if biomarker in demo_values:
+                entry.insert(0, str(demo_values[biomarker]))
+    
+    def new_patient(self):
+        """Reset the form for a new patient"""
+        # Clear patient info fields
+        self.patient_id_entry.delete(0, tk.END)
+        self.name_entry.delete(0, tk.END)
+        self.age_entry.delete(0, tk.END)
+        self.gender_var.set("Unknown")
+        self.history_text.delete(1.0, tk.END)
+        self.family_history_text.delete(1.0, tk.END)
+        
+        # Clear biomarker entries
+        for entry in self.biomarker_entries.values():
+            entry.delete(0, tk.END)
+        
+        # Clear results
+        self.clear_results()
+        self.status_var.set("Ready for new patient data")
+
+    def clear_results(self):
+        """Clear all result displays"""
+        self.risk_summary.config(state=tk.NORMAL)
+        self.risk_summary.delete(1.0, tk.END)
+        self.risk_summary.insert(tk.END, "Biomarker analysis results will appear here.")
+        self.risk_summary.config(state=tk.DISABLED)
+        
+        self.recommend_text.config(state=tk.NORMAL)
+        self.recommend_text.delete(1.0, tk.END)
+        self.recommend_text.insert(tk.END, "Clinical recommendations will appear here.")
+        self.recommend_text.config(state=tk.DISABLED)
+        
+        # Clear visualization frame
+        for widget in self.viz_frame.winfo_children():
+            widget.destroy()
+        
+        # Clear biomarker table
+        for item in self.biomarker_tree.get_children():
+            self.biomarker_tree.delete(item)
+
+    def analyze_biomarkers(self):
+        """Analyze entered biomarker values with proper validation"""
+        try:
+            # Get patient info
+            patient_data = {
+                'id': self.patient_id_entry.get(),
+                'name': self.name_entry.get(),
+                'age': self.validate_age(self.age_entry.get()),
+                'gender': self.gender_var.get(),
+                'history': self.history_text.get("1.0", tk.END).strip(),
+                'family_history': self.family_history_text.get("1.0", tk.END).strip(),
+                'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            # Get biomarker values with validation
+            biomarker_data = {}
+            missing_fields = []
+            
+            for biomarker, entry in self.biomarker_entries.items():
+                value = entry.get()
+                if not value:
+                    missing_fields.append(biomarker)
+                    continue
+                try:
+                    biomarker_data[biomarker] = float(value)
+                except ValueError:
+                    raise ValueError(f"Invalid number for {biomarker}")
+            
+            if missing_fields:
+                raise ValueError(f"Missing values for: {', '.join(missing_fields)}")
+            
+            # Store current patient data
+            self.current_patient = {**patient_data, **biomarker_data}
+            
+            # Perform analysis
+            self.perform_medical_analysis()
+            
+            # Update status
+            self.status_var.set(f"Analysis completed for {patient_data['name']}")
+            
+        except ValueError as e:
+            messagebox.showerror("Input Error", f"Please correct the following:\n{str(e)}")
+            self.status_var.set("Error in input values")
+    
+    def validate_age(self, age_str):
+        """Validate age input"""
+        try:
+            age = int(age_str)
+            if age < 18 or age > 120:
+                raise ValueError("Age must be between 18 and 120")
+            return age
+        except ValueError:
+            raise ValueError("Please enter a valid age (18-120)")
+    
+    def perform_medical_analysis(self):
+        """Perform comprehensive medical analysis with proper feature validation"""
+        try:
+            # Prepare data for models in consistent order
+            biomarker_values = []
+            expected_biomarkers = list(self.config['biomarkers'].keys())
+            
+            # Verify we have all expected biomarkers (including Age)
+            for biomarker in expected_biomarkers:
+                if biomarker not in self.current_patient:
+                    raise ValueError(f"Missing biomarker: {biomarker}")
+                # Include Age in the features
+                biomarker_values.append(self.current_patient[biomarker])
+            
+            X = np.array([biomarker_values])
+            
+            # Verify we have exactly 15 features (all biomarkers)
+            if X.shape[1] != len(self.config['biomarkers']):
+                raise ValueError(f"Expected {len(self.config['biomarkers'])} biomarkers, got {X.shape[1]}")
+            
+            # Analyze for each cancer type
+            self.results = []
+            
+            for cancer_code, cancer_name in self.config['cancer_types'].items():
+                # Scale features
+                X_scaled = self.scalers[cancer_code].transform(X)
+                
+                # Predict probability
+                proba = self.models[cancer_code].predict_proba(X_scaled)[0][1]
+                
+                # Determine risk level
+                risk_level = "High" if proba >= self.config['risk_threshold'] else "Moderate" if proba >= 0.4 else "Low"
+                
+                self.results.append({
+                    'Cancer Type': cancer_name,
+                    'Risk Probability': f"{proba*100:.1f}%",
+                    'Risk Level': risk_level
+                })
+            
+            # Update results display
+            self.update_results_display(self.results)
+            self.update_biomarker_table()
+            self.generate_recommendations(self.results)
+            self.create_visualizations(self.results)
+            
+        except Exception as e:
+            messagebox.showerror("Analysis Error", f"Could not complete analysis:\n{str(e)}")
+            self.status_var.set("Analysis failed")
+    
+    def update_results_display(self, results):
+        """Update the risk assessment display"""
+        self.risk_summary.config(state=tk.NORMAL)
+        self.risk_summary.delete(1.0, tk.END)
+        
+        # Patient summary
+        self.risk_summary.insert(tk.END, f"Patient: {self.current_patient['name']} ({self.current_patient['age']} {self.current_patient['gender']})\n")
+        self.risk_summary.insert(tk.END, f"ID: {self.current_patient['id']}\n")
+        self.risk_summary.insert(tk.END, f"Analysis Date: {self.current_patient['timestamp']}\n\n")
+        
+        # Risk summary
+        self.risk_summary.insert(tk.END, "Cancer Risk Assessment Summary:\n", 'bold')
+        
+        for result in sorted(results, key=lambda x: float(x['Risk Probability'][:-1]), reverse=True):
+            color = 'red' if result['Risk Level'] == "High" else 'orange' if result['Risk Level'] == "Moderate" else 'black'
+            
+            self.risk_summary.insert(tk.END, f"\n{result['Cancer Type']}: ")
+            self.risk_summary.insert(tk.END, f"{result['Risk Probability']} ({result['Risk Level']} Risk)", color)
+        
+        self.risk_summary.config(state=tk.DISABLED)
+    
+    def update_biomarker_table(self):
+        """Update the detailed biomarker table"""
+        # Clear existing items
+        for item in self.biomarker_tree.get_children():
+            self.biomarker_tree.delete(item)
+        
+        # Add biomarker data
+        for biomarker, info in self.config['biomarkers'].items():
+            value = self.current_patient[biomarker]
+            normal_range = f"{info['range'][0]}-{info['range'][1]}"
+            
+            # Determine status
+            if info['critical'] is not None:
+                if isinstance(info['critical'], tuple):
+                    # Range critical values
+                    if value < info['critical'][0] or value > info['critical'][1]:
+                        status = "Critical"
+                    elif value < info['range'][0] or value > info['range'][1]:
+                        status = "Abnormal"
+                    else:
+                        status = "Normal"
+                else:
+                    # Single critical value
+                    if (biomarker in ['CRP', 'CA125', 'PSA', 'CEA', 'CA19.9', 'AFP'] and 
+                        value > info['critical']):
+                        status = "Critical"
+                    elif value < info['range'][0] or value > info['range'][1]:
+                        status = "Abnormal"
+                    else:
+                        status = "Normal"
+            else:
+                if value < info['range'][0] or value > info['range'][1]:
+                    status = "Abnormal"
+                else:
+                    status = "Normal"
+            
+            # Insert into treeview
+            self.biomarker_tree.insert("", tk.END, values=(
+                biomarker, 
+                f"{value} {info['unit']}", 
+                normal_range, 
+                status
+            ))
+    
+    def generate_recommendations(self, results):
+        """Generate clinical recommendations based on results"""
+        self.recommend_text.config(state=tk.NORMAL)
+        self.recommend_text.delete(1.0, tk.END)
+        
+        # Header
+        self.recommend_text.insert(tk.END, "Clinical Recommendations\n\n", 'bold')
+        
+        # General recommendations
+        self.recommend_text.insert(tk.END, "Based on the biomarker analysis and risk assessment:\n\n")
+        
+        # High risk cancers
+        high_risk = [r for r in results if r['Risk Level'] == "High"]
+        if high_risk:
+            self.recommend_text.insert(tk.END, "High Risk Detected For:\n", 'bold')
+            for risk in high_risk:
+                self.recommend_text.insert(tk.END, f"- {risk['Cancer Type']} ({risk['Risk Probability']})\n")
+            
+            self.recommend_text.insert(tk.END, "\nRecommended Actions:\n", 'bold')
+            self.recommend_text.insert(tk.END, "- Urgent referral to oncology specialist\n")
+            self.recommend_text.insert(tk.END, "- Diagnostic imaging (CT/MRI/PET as appropriate)\n")
+            self.recommend_text.insert(tk.END, "- Tissue biopsy if indicated\n")
+            self.recommend_text.insert(tk.END, "- Genetic counseling if family history is significant\n")
+        
+        # Moderate risk cancers
+        moderate_risk = [r for r in results if r['Risk Level'] == "Moderate"]
+        if moderate_risk:
+            self.recommend_text.insert(tk.END, "\nModerate Risk Detected For:\n", 'bold')
+            for risk in moderate_risk:
+                self.recommend_text.insert(tk.END, f"- {risk['Cancer Type']} ({risk['Risk Probability']})\n")
+            
+            self.recommend_text.insert(tk.END, "\nRecommended Actions:\n", 'bold')
+            self.recommend_text.insert(tk.END, "- Follow-up testing in 3-6 months\n")
+            self.recommend_text.insert(tk.END, "- Consider specialist referral if symptoms develop\n")
+            self.recommend_text.insert(tk.END, "- Lifestyle modifications (diet, exercise, smoking cessation)\n")
+        
+        # All patients
+        self.recommend_text.insert(tk.END, "\nGeneral Recommendations:\n", 'bold')
+        self.recommend_text.insert(tk.END, "- Annual physical examination\n")
+        self.recommend_text.insert(tk.END, "- Age-appropriate cancer screening\n")
+        self.recommend_text.insert(tk.END, "- Healthy lifestyle maintenance\n")
+        self.recommend_text.insert(tk.END, "- Regular follow-up as needed\n")
+        
+        self.recommend_text.config(state=tk.DISABLED)
+    
+    def create_visualizations(self, results):
+        """Create medical visualizations with improved layout to prevent overlapping"""
+        # Clear previous visualizations
+        for widget in self.viz_frame.winfo_children():
+            widget.destroy()
+
+        # Create figure with adjusted size and layout
+        fig = plt.figure(figsize=(10, 8), tight_layout=True)  # Increased height
+        
+        # Create subplots with adjusted spacing
+        gs = fig.add_gridspec(2, 1, height_ratios=[1, 1.2])  # Stacked vertically
+        
+        # Risk probabilities plot (top)
+        ax1 = fig.add_subplot(gs[0])
+        cancer_types = [r['Cancer Type'] for r in results]
+        probabilities = [float(r['Risk Probability'][:-1]) for r in results]
+        
+        colors = []
+        for prob in probabilities:
+            if prob >= self.config['risk_threshold'] * 100:
+                colors.append('red')
+            elif prob >= 40:
+                colors.append('orange')
+            else:
+                colors.append('green')
+        
+        bars = ax1.barh(cancer_types, probabilities, color=colors)
+        ax1.set_xlabel('Risk Probability (%)')
+        ax1.set_title('Cancer Risk Assessment', pad=10)  # Added padding
+        ax1.axvline(x=self.config['risk_threshold'] * 100, color='red', linestyle='--')
+        
+        # Add value labels to bars if space permits
+        for bar in bars:
+            width = bar.get_width()
+            if width > 5:  # Only label if there's enough space
+                ax1.text(width - 5, bar.get_y() + bar.get_height()/2,
+                        f'{width:.1f}%',
+                        ha='right', va='center', color='white')
+        
+        # Biomarker radar chart (bottom)
+        ax2 = fig.add_subplot(gs[1], polar=True)
+        biomarkers = list(self.config['biomarkers'].keys())[1:7]  # Select 6 key biomarkers
+        values = [self.current_patient[b] for b in biomarkers]
+        ranges = [self.config['biomarkers'][b]['range'] for b in biomarkers]
+        
+        # Normalize values (0-1 scale within normal range)
+        normalized = []
+        for val, (lower, upper) in zip(values, ranges):
+            if val < lower:
+                normalized_val = 0.5 * (val / lower)
+            elif val > upper:
+                normalized_val = 0.5 + 0.5 * ((val - upper) / (2 * upper))
+            else:
+                normalized_val = 0.5 * (val - lower) / (upper - lower) + 0.25
+            normalized.append(normalized_val * 100)  # Scale to 0-100
+        
+        angles = np.linspace(0, 2 * np.pi, len(biomarkers), endpoint=False).tolist()
+        angles += angles[:1]
+        normalized += normalized[:1]
+        
+        ax2.plot(angles, normalized, 'o-', linewidth=2)
+        ax2.fill(angles, normalized, alpha=0.25)
+        ax2.set_thetagrids(np.degrees(angles[:-1]), biomarkers)
+        ax2.set_title('Key Biomarker Profile', pad=20)  # Added padding
+        ax2.set_ylim(0, 100)
+        
+        # Add critical zones
+        for angle in angles[:-1]:
+            ax2.plot([angle, angle], [0, 100], 'grey', alpha=0.2)
+
+        # Embed in Tkinter with proper packing and scroll
+        canvas = FigureCanvasTkAgg(fig, master=self.viz_frame)
+        canvas.draw()
+        
+        # Add scrollbar if needed
+        scrollbar = ttk.Scrollbar(self.viz_frame, orient="vertical", command=canvas.get_tk_widget().yview)
+        canvas.get_tk_widget().configure(yscrollcommand=scrollbar.set)
+        
+        canvas.get_tk_widget().pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    def clear_biomarkers(self):
+        """Clear all biomarker input fields"""
+        for entry in self.biomarker_entries.values():
+            entry.delete(0, tk.END)
+        
+        self.clear_results()
+        self.status_var.set("Fields cleared. Ready for new input.")
+    
+    def load_patient_data(self):
+        """Load patient data from file (simulated)"""
+        filepath = filedialog.askopenfilename(
+            title="Open Patient Data",
+            filetypes=(("CSV Files", "*.csv"), ("All Files", "*.*"))
+        )
+        
+        if filepath:
+            try:
+                # Simulate loading - in real app would parse actual patient data
+                self.set_demo_patient()
+                self.status_var.set(f"Loaded patient data from {os.path.basename(filepath)}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not load file: {str(e)}")
+                self.status_var.set("Error loading patient data")
+    
+    def save_report(self):
+        """Save analysis report to file"""
+        if not hasattr(self, 'current_patient') or not self.current_patient:
+            messagebox.showwarning("No Data", "No patient analysis to save")
+            return
+        
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=(("PDF Files", "*.pdf"), ("Text Files", "*.txt"), ("All Files", "*.*")),
+            title="Save Analysis Report")
+        
+        if filepath:
+            try:
+                with open(filepath, 'w') as f:
+                    f.write(f"MedScreen AI Cancer Risk Assessment Report\n\n")
+                    f.write(f"Patient: {self.current_patient['name']}\n")
+                    f.write(f"ID: {self.current_patient['id']}\n")
+                    f.write(f"Date: {self.current_patient['timestamp']}\n\n")
+                    
+                    f.write("Risk Assessment Summary:\n")
+                    for result in self.results:
+                        f.write(f"{result['Cancer Type']}: {result['Risk Probability']} ({result['Risk Level']} Risk)\n")
+                    
+                    f.write("\nClinical Recommendations:\n")
+                    f.write(self.recommend_text.get("1.0", tk.END))
+                
+                self.status_var.set(f"Report saved to {os.path.basename(filepath)}")
+                messagebox.showinfo("Success", "Report saved successfully")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not save file: {str(e)}")
+                self.status_var.set("Error saving report")
+    
+    def show_risk_calculator(self):
+        """Show additional risk calculator tool"""
+        calculator = tk.Toplevel(self.root)
+        calculator.title("Advanced Risk Calculator")
+        calculator.geometry("600x400")
+        
+        ttk.Label(calculator, text="Advanced Risk Calculator (Under Development)", 
+                 font=('Helvetica', 12)).pack(pady=20)
+        
+        ttk.Label(calculator, text="This tool would integrate additional risk factors like:", 
+                 wraplength=500).pack(pady=10)
+        
+        ttk.Label(calculator, text="- Genetic markers\n- Lifestyle factors\n- Environmental exposures\n- Comprehensive family history", 
+                 justify=tk.LEFT).pack()
+        
+        ttk.Button(calculator, text="Close", command=calculator.destroy).pack(pady=20)
+    
+    def show_trend_analysis(self):
+        """Show trend analysis tool"""
+        trend = tk.Toplevel(self.root)
+        trend.title("Biomarker Trend Analysis")
+        trend.geometry("600x400")
+        
+        ttk.Label(trend, text="Biomarker Trend Analysis (Under Development)", 
+                 font=('Helvetica', 12)).pack(pady=20)
+        
+        ttk.Label(trend, text="This tool would visualize biomarker changes over time when", 
+                 wraplength=500).pack(pady=10)
+        
+        ttk.Label(trend, text="- Multiple test results are available\n- Tracking response to treatment\n- Monitoring high-risk patients", 
+                 justify=tk.LEFT).pack()
+        
+        ttk.Button(trend, text="Close", command=trend.destroy).pack(pady=20)
+    
+    def show_guidelines(self):
+        """Show clinical guidelines reference"""
+        guidelines = tk.Toplevel(self.root)
+        guidelines.title("Clinical Guidelines")
+        guidelines.geometry("600x400")
+        
+        ttk.Label(guidelines, text="Clinical Practice Guidelines", 
+                 font=('Helvetica', 12)).pack(pady=20)
+        
+        text = tk.Text(guidelines, wrap=tk.WORD)
+        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        guidelines_text = """Cancer Screening Guidelines Summary:
+
+1. Colorectal Cancer:
+   - Start screening at age 45-50
+   - Colonoscopy every 10 years or FIT annually
+
+2. Breast Cancer:
+   - Mammography every 1-2 years starting at age 40-50
+   - MRI for high-risk patients
+
+3. Prostate Cancer:
+   - PSA testing based on shared decision making from age 50-55
+   - Earlier for high-risk groups
+
+4. Lung Cancer:
+   - Annual low-dose CT for high-risk smokers (30 pack-year history)
+
+Note: These are general guidelines. Individual recommendations may vary based on risk factors."""
+        
+        text.insert(tk.END, guidelines_text)
+        text.config(state=tk.DISABLED)
+        
+        ttk.Button(guidelines, text="Close", command=guidelines.destroy).pack(pady=10)
+    
+    def show_about(self):
+        """Show about dialog"""
+        about = tk.Toplevel(self.root)
+        about.title("About MedScreen AI")
+        about.geometry("500x300")
+        
+        ttk.Label(about, text="MedScreen AI - Advanced Cancer Risk Assessment", 
+                 font=('Helvetica', 12)).pack(pady=20)
+        
+        about_text = """Version: 1.0 (Clinical Prototype)
+
+This software is a decision support tool designed to assist healthcare professionals in cancer risk assessment based on biomarker analysis.
+
+Features:
+- Multi-cancer risk assessment
+- Comprehensive biomarker analysis
+- Clinical decision support
+- Visual analytics
+
+DISCLAIMER: This is a prototype system for demonstration purposes only. Not for clinical use."""
+        
+        ttk.Label(about, text=about_text, justify=tk.LEFT).pack(pady=10)
+        
+        ttk.Button(about, text="Close", command=about.destroy).pack(pady=10)
+    
+    def show_docs(self):
+        """Open documentation in browser"""
+        webbrowser.open("https://example.com/medscreen-ai-docs")
+
+# Run the application
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = AdvancedCancerPredictor(root)
+    
+    # Configure tags for text styling
+    app.risk_summary.tag_config('bold', font=('Helvetica', 11, 'bold'))
+    app.risk_summary.tag_config('red', foreground='red')
+    app.risk_summary.tag_config('orange', foreground='orange')
+    
+    app.recommend_text.tag_config('bold', font=('Helvetica', 11, 'bold'))
+    
+    root.mainloop()
