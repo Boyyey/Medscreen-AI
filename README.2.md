@@ -68,12 +68,12 @@ This tool empowers doctors and researchers to ask the right questions, **earlier
 
 ---
 
-## 🖥️ How to Run
+## 🖥️ How to Run:
 
-```bash
 python luad.file.2.py
 
-🛠️ Built With
+🛠️ Built With:
+
 Python, Tkinter, ttk
 
 scikit-learn, NumPy, Pandas
