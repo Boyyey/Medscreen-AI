@@ -4,7 +4,7 @@ Welcome to **MedScreen AI**, a cutting-edge AI-powered platform designed for **e
 
 🎯 This tool is **not just software** — it's a mission. A mission to **support early detection**, empower healthcare professionals, and ultimately, help save lives.
 
-> ⚠️ **DISCLAIMER**: This is a clinical prototype designed for research and demonstration. It is **not a diagnostic tool** and must **not** replace professional medical advice. All predictions must be interpreted by qualified physicians.
+> ⚠️ **DISCLAIMER**: This is a clinical prototype designed for research and demonstration. It must **not** replace professional medical advice. All predictions must be interpreted by qualified physicians.
 
 ---
 
@@ -70,7 +70,7 @@ This tool empowers doctors and researchers to ask the right questions, **earlier
 
 ## 🖥️ How to Run
 
-
+```bash
 python luad.file.2.py
 
 🛠️ Built With
