@@ -1,3 +1,4 @@
+![med-screen-ai](https://github.com/user-attachments/assets/cac8bb5a-fef9-4f52-8e3e-2659d9f35d32)
 # 🧠 MedScreen AI — Cancer Risk Assessment That Could Save Lives
 
 Welcome to **MedScreen AI**, a cutting-edge AI-powered platform designed for **early cancer risk detection** using **biomarker analysis** and intelligent visualization. 🧬
@@ -84,8 +85,7 @@ py3Dmol, PIL, tkinterweb
 
 Optional: MDAnalysis, BioPython, imbalanced-learn
 
-📚 Roadmap
-🚧 Upcoming Features:
+🎯 Roadmap:
 
 Genetic marker integration 🧬
 
